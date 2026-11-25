@@ -397,7 +397,9 @@ class v8DetectionLoss:
             nwd=getattr(h, "nwd", 0.0) or 0.0,
             nwd_c=getattr(h, "nwd_c", 12.8) or 12.8,
         )
-        self.bbox_loss = BboxLoss(m.reg_max, getattr(h, "nwd", 0.0) or 0.0, getattr(h, "nwd_c", 12.8) or 12.8).to(device)
+        self.bbox_loss = BboxLoss(m.reg_max, getattr(h, "nwd", 0.0) or 0.0, getattr(h, "nwd_c", 12.8) or 12.8).to(
+            device
+        )
         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:

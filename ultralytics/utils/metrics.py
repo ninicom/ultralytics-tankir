@@ -109,10 +109,10 @@ def box_iou(box1: torch.Tensor, box2: torch.Tensor, eps: float = 1e-7) -> torch.
 def bbox_nwd(box1: torch.Tensor, box2: torch.Tensor, C: float = 12.8, eps: float = 1e-7) -> torch.Tensor:
     """Normalized Wasserstein Distance between xyxy boxes (TankIR).
 
-    Each box is modelled as a 2D Gaussian N((cx, cy), diag(w^2/4, h^2/4)); the 2-Wasserstein distance between two such
+    Each box is modeled as a 2D Gaussian N((cx, cy), diag(w^2/4, h^2/4)); the 2-Wasserstein distance between two such
     Gaussians is ||c1 - c2||^2 + ||(w1, h1) - (w2, h2)||^2 / 4, and NWD = exp(-sqrt(W2^2) / C). Unlike IoU it stays
-    informative when tiny boxes do not overlap (Wang et al., "A Normalized Gaussian Wasserstein Distance for Tiny
-    Object Detection", 2021). Broadcasts like bbox_iou; returns shape (..., 1) if inputs end with 4, else (...,).
+    informative when tiny boxes do not overlap (Wang et al., "A Normalized Gaussian Wasserstein Distance for Tiny Object
+    Detection", 2021). Broadcasts like bbox_iou; returns shape (..., 1) if inputs end with 4, else (...,).
     """
     c1 = (box1[..., :2] + box1[..., 2:4]) / 2
     c2 = (box2[..., :2] + box2[..., 2:4]) / 2
