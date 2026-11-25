@@ -234,6 +234,10 @@ class BasePredictor:
         Returns:
             (list[np.ndarray]): List of transformed images.
         """
+        if getattr(self.args, "ir_input", None):  # TankIR: same thermal encoding as in training
+            from ultralytics.utils.thermal import encode
+
+            im = [encode(x, self.args.ir_input) for x in im]
         same_shapes = len({x.shape for x in im}) == 1
         letterbox = LetterBox(
             self.imgsz,

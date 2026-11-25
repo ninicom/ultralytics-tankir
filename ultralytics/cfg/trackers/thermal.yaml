@@ -1,0 +1,19 @@
+# TankIR thermal tracker: BoT-SORT association without RGB ReID, camera-motion compensation and NSA-Kalman.
+# Rationale: appearance ReID trained on visible-light pedestrians is unreliable on single-channel thermal vehicles,
+# while platform motion (UAV, gimbal, weapon sight) and confidence drops (smoke, foliage, dust) dominate the errors.
+
+tracker_type: botsort # (str) BoT-SORT backend
+track_high_thresh: 0.25 # (float) First-stage match threshold
+track_low_thresh: 0.1 # (float) Second-stage threshold for low-score matches
+new_track_thresh: 0.25 # (float) Start a new track if no match >= this
+track_buffer: 60 # (int) Frames to keep lost tracks alive (longer: occlusion behind smoke/foliage)
+match_thresh: 0.8 # (float) Association similarity threshold
+fuse_score: True # (bool) Fuse detection score with IoU for matching
+
+gmc_method: sparseOptFlow # (str) Camera motion compensation: sparseOptFlow|orb|sift|ecc|none
+nsa: True # (bool) TankIR: NSA-Kalman, measurement noise scaled by (1 - confidence)
+
+proximity_thresh: 0.5 # (float) Unused without ReID
+appearance_thresh: 0.8 # (float) Unused without ReID
+with_reid: False # (bool) RGB ReID disabled on thermal
+model: auto # (str) Unused without ReID

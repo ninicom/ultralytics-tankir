@@ -113,10 +113,16 @@ class STrack(BaseTrack):
         self.frame_id = frame_id
         self.start_frame = frame_id
 
+    nsa = False  # TankIR: confidence-adaptive (NSA) Kalman update, set from the tracker yaml key `nsa`
+
+    def _nsa_kw(self, new_track) -> dict:
+        """Return the `confidence` kwarg for KalmanFilter.update when NSA-Kalman is enabled (R_k = (1 - c_k) R)."""
+        return {"confidence": float(new_track.score)} if self.nsa and new_track.score is not None else {}
+
     def re_activate(self, new_track: STrack, frame_id: int, new_id: bool = False):
         """Reactivate a previously lost track using new detection data and update its state and attributes."""
         self.mean, self.covariance = self.kalman_filter.update(
-            self.mean, self.covariance, self.convert_coords(new_track.tlwh)
+            self.mean, self.covariance, self.convert_coords(new_track.tlwh), **self._nsa_kw(new_track)
         )
         self.tracklet_len = 0
         self.state = TrackState.Tracked
@@ -149,7 +155,7 @@ class STrack(BaseTrack):
 
         new_tlwh = new_track.tlwh
         self.mean, self.covariance = self.kalman_filter.update(
-            self.mean, self.covariance, self.convert_coords(new_tlwh)
+            self.mean, self.covariance, self.convert_coords(new_tlwh), **self._nsa_kw(new_track)
         )
         self.state = TrackState.Tracked
         self.is_activated = True
@@ -269,6 +275,7 @@ class BYTETracker:
         self.args = args
         self.max_frames_lost = args.track_buffer
         self.kalman_filter = self.get_kalmanfilter()
+        STrack.nsa = bool(getattr(args, "nsa", False))  # TankIR: NSA-Kalman switch (class-wide, also for BOTrack)
         self.reset_id()
 
     def update(self, results, img: np.ndarray | None = None, feats: np.ndarray | None = None, **kwargs) -> np.ndarray:

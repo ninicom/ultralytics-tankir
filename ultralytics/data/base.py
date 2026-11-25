@@ -217,6 +217,7 @@ class BaseDataset(Dataset):
             self.cache_images()
 
         # Transforms
+        self.ir_input = getattr(hyp, "ir_input", None) or None  # TankIR thermal input encoding
         self.transforms = self.build_transforms(hyp=copy(hyp))  # subclasses zero unsupported keys, never the caller's
 
     def get_img_files(self, img_path: str | list[str]) -> list[str]:
@@ -339,6 +340,10 @@ class BaseDataset(Dataset):
         im = self.ims[i]
         if im is None:  # not cached in RAM
             im = self._load_source(i)
+            if getattr(self, "ir_input", None):
+                from ultralytics.utils.thermal import encode
+
+                im = encode(im, self.ir_input)
             if self.tile:
                 x1, y1, x2, y2 = self.labels[i]["tile"]
                 im = im[y1:y2, x1:x2].copy()

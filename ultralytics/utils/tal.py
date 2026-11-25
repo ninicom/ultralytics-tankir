@@ -6,7 +6,7 @@ import torch
 from torch import nn
 
 from . import LOGGER
-from .metrics import bbox_iou, probiou
+from .metrics import bbox_iou, bbox_nwd, probiou
 from .ops import crop_mask, xywh2xyxy, xywhr2xyxyxyxy, xyxy2xywh
 from .torch_utils import TORCH_1_11, autocast
 
@@ -37,6 +37,8 @@ class TaskAlignedAssigner(nn.Module):
         stride: list | None = None,
         eps: float = 1e-9,
         topk2: int | None = None,
+        nwd: float = 0.0,
+        nwd_c: float = 12.8,
     ):
         """Initialize a TaskAlignedAssigner object with customizable hyperparameters.
 
@@ -58,6 +60,7 @@ class TaskAlignedAssigner(nn.Module):
         self.stride = stride if stride is not None else [8, 16, 32]
         self.stride_val = self.stride[1] if len(self.stride) > 1 else self.stride[0]
         self.eps = eps
+        self.nwd, self.nwd_c = float(nwd), float(nwd_c)  # TankIR: NWD weight (pixel boxes here)
         self._oom_warned = False
 
     @torch.no_grad()
@@ -252,7 +255,10 @@ class TaskAlignedAssigner(nn.Module):
         Returns:
             (torch.Tensor): CIoU values between each pair of boxes with shape (N,).
         """
-        return bbox_iou(gt_bboxes, pd_bboxes, xywh=False, CIoU=True).squeeze(-1).clamp_(0)
+        iou = bbox_iou(gt_bboxes, pd_bboxes, xywh=False, CIoU=True).squeeze(-1).clamp_(0)
+        if self.nwd > 0:  # TankIR: tiny / halo-blurred thermal targets
+            iou = (1 - self.nwd) * iou + self.nwd * bbox_nwd(gt_bboxes, pd_bboxes, self.nwd_c)
+        return iou
 
     def select_topk_candidates(self, metrics, topk_mask=None):
         """Select the top-k candidates based on the given metrics.

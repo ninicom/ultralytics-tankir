@@ -23,7 +23,7 @@ from ultralytics.utils.tal import (
 )
 from ultralytics.utils.torch_utils import autocast, interpolate_bilinear
 
-from .metrics import bbox_iou, probiou
+from .metrics import bbox_iou, bbox_nwd, probiou
 from .tal import bbox2dist, rbox2dist
 
 
@@ -119,10 +119,14 @@ class DFLoss(nn.Module):
 class BboxLoss(nn.Module):
     """Criterion class for computing training losses for bounding boxes."""
 
-    def __init__(self, reg_max: int = 16):
-        """Initialize the BboxLoss module; DFL is used when reg_max > 1, otherwise an L1 distance loss."""
+    def __init__(self, reg_max: int = 16, nwd: float = 0.0, nwd_c: float = 12.8):
+        """Initialize the BboxLoss module; DFL is used when reg_max > 1, otherwise an L1 distance loss.
+
+        nwd > 0 blends the CIoU loss with an NWD loss computed on pixel boxes (TankIR).
+        """
         super().__init__()
         self.dfl_loss = DFLoss(reg_max) if reg_max > 1 else None
+        self.nwd, self.nwd_c = float(nwd), float(nwd_c)
 
     def forward(
         self,
@@ -141,6 +145,10 @@ class BboxLoss(nn.Module):
         weight = target_scores[fg_mask].sum(-1, keepdim=True)
         iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
         loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
+        if self.nwd > 0:  # TankIR: boxes here are in grid units -> multiply by the per-anchor stride for pixels
+            s = stride[fg_mask[1]] if stride.dim() == 2 else stride
+            n = bbox_nwd(pred_bboxes[fg_mask] * s, target_bboxes[fg_mask] * s, self.nwd_c).unsqueeze(-1)
+            loss_iou = (1 - self.nwd) * loss_iou + self.nwd * ((1.0 - n) * weight).sum() / target_scores_sum
 
         # DFL loss
         if self.dfl_loss:
@@ -386,8 +394,10 @@ class v8DetectionLoss:
             beta=6.0,
             stride=self.stride.tolist(),
             topk2=tal_topk2,
+            nwd=getattr(h, "nwd", 0.0) or 0.0,
+            nwd_c=getattr(h, "nwd_c", 12.8) or 12.8,
         )
-        self.bbox_loss = BboxLoss(m.reg_max).to(device)
+        self.bbox_loss = BboxLoss(m.reg_max, getattr(h, "nwd", 0.0) or 0.0, getattr(h, "nwd_c", 12.8) or 12.8).to(device)
         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
