@@ -9,8 +9,8 @@ from __future__ import annotations
 import math
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 
 class MambaBlock(nn.Module):
@@ -28,14 +28,14 @@ class MambaBlock(nn.Module):
         self.A_log = nn.Parameter(torch.log(torch.arange(1, d_state + 1, dtype=torch.float32).repeat(c, 1)))
         self.D = nn.Parameter(torch.ones(c))
         self.out_proj = nn.Linear(c, c)
-        self.gamma = nn.Parameter(torch.zeros(1))  # starts as identity -> keeps pretrained behaviour at init
+        self.gamma = nn.Parameter(torch.zeros(1))  # starts as identity -> keeps pretrained behavior at init
         nn.init.normal_(self.dt_proj.weight, std=1e-3)
         nn.init.constant_(self.dt_proj.bias, math.log(math.expm1(0.05)))
 
     def _scan(self, u, dt, Bm, Cm):
-        A = -torch.exp(self.A_log)                                  # (c, n)
-        dA = torch.exp(dt.unsqueeze(-1) * A)                         # (b, L, c, n)
-        dBu = dt.unsqueeze(-1) * Bm.unsqueeze(2) * u.unsqueeze(-1)   # (b, L, c, n)
+        A = -torch.exp(self.A_log)  # (c, n)
+        dA = torch.exp(dt.unsqueeze(-1) * A)  # (b, L, c, n)
+        dBu = dt.unsqueeze(-1) * Bm.unsqueeze(2) * u.unsqueeze(-1)  # (b, L, c, n)
         h = u.new_zeros(u.shape[0], self.c, self.n)
         ys = []
         for t in range(u.shape[1]):
@@ -45,10 +45,10 @@ class MambaBlock(nn.Module):
 
     def forward(self, x):
         b, c, hh, ww = x.shape
-        s = x.flatten(2).transpose(1, 2)                             # (b, L, c)
+        s = x.flatten(2).transpose(1, 2)  # (b, L, c)
         u, g = self.in_proj(self.norm(s)).chunk(2, dim=-1)
         u = F.silu(self.conv(u.transpose(1, 2)).transpose(1, 2))
-        with torch.autocast(device_type='cuda', enabled=False):
+        with torch.autocast(device_type="cuda", enabled=False):
             u32 = u.float()
             dt = F.softplus(self.dt_proj(u32))
             Bm, Cm = self.B_proj(u32), self.C_proj(u32)
@@ -68,9 +68,20 @@ class RepViTBlock(nn.Module):
         self.dw1 = nn.Sequential(nn.Conv2d(c, c, 1, 1, 0, groups=c, bias=False), nn.BatchNorm2d(c))
         self.bn = nn.BatchNorm2d(c)
         r = max(8, c // 4)
-        self.se = nn.Sequential(nn.AdaptiveAvgPool2d(1), nn.Conv2d(c, r, 1), nn.ReLU(inplace=True), nn.Conv2d(r, c, 1), nn.Sigmoid()) if se else None
-        self.ffn = nn.Sequential(nn.Conv2d(c, c * ratio, 1, bias=False), nn.BatchNorm2d(c * ratio), nn.GELU(),
-                                 nn.Conv2d(c * ratio, c, 1, bias=False), nn.BatchNorm2d(c))
+        self.se = (
+            nn.Sequential(
+                nn.AdaptiveAvgPool2d(1), nn.Conv2d(c, r, 1), nn.ReLU(inplace=True), nn.Conv2d(r, c, 1), nn.Sigmoid()
+            )
+            if se
+            else None
+        )
+        self.ffn = nn.Sequential(
+            nn.Conv2d(c, c * ratio, 1, bias=False),
+            nn.BatchNorm2d(c * ratio),
+            nn.GELU(),
+            nn.Conv2d(c * ratio, c, 1, bias=False),
+            nn.BatchNorm2d(c),
+        )
 
     def forward(self, x):
         t = self.dw3(x) + self.dw1(x) + self.bn(x)
@@ -83,23 +94,23 @@ class RepViTBlock(nn.Module):
 class StripAttention(nn.Module):
     """M1 – Barrel-aware Strip Attention (BSA).
 
-    Long horizontal / vertical depthwise strip convolutions plus row/column strip pooling,
-    to emphasise elongated structures (gun barrel, hull/track line) with global context along
-    each axis. Only pooling + convs -> TensorRT friendly. Residual gate starts at 0 (identity).
+    Long horizontal / vertical depthwise strip convolutions plus row/column strip pooling, to emphasize elongated
+    structures (gun barrel, hull/track line) with global context along each axis. Only pooling + convs -> TensorRT
+    friendly. Residual gate starts at 0 (identity).
     """
 
     def __init__(self, c, k=11):
         super().__init__()
         self.h_conv = nn.Conv2d(c, c, (1, k), padding=(0, k // 2), groups=c, bias=False)
         self.v_conv = nn.Conv2d(c, c, (k, 1), padding=(k // 2, 0), groups=c, bias=False)
-        self.row = nn.Conv1d(c, c, 7, padding=3, groups=c, bias=False)   # along H (pooled over W)
-        self.col = nn.Conv1d(c, c, 7, padding=3, groups=c, bias=False)   # along W (pooled over H)
+        self.row = nn.Conv1d(c, c, 7, padding=3, groups=c, bias=False)  # along H (pooled over W)
+        self.col = nn.Conv1d(c, c, 7, padding=3, groups=c, bias=False)  # along W (pooled over H)
         self.fuse = nn.Sequential(nn.Conv2d(c, c, 1, bias=False), nn.BatchNorm2d(c))
         self.gamma = nn.Parameter(torch.zeros(1))
 
     def forward(self, x):
-        rp = self.row(x.mean(3)).unsqueeze(3)          # (b,c,h,1)
-        cp = self.col(x.mean(2)).unsqueeze(2)          # (b,c,1,w)
+        rp = self.row(x.mean(3)).unsqueeze(3)  # (b,c,h,1)
+        cp = self.col(x.mean(2)).unsqueeze(2)  # (b,c,1,w)
         a = torch.sigmoid(self.fuse(self.h_conv(x) + self.v_conv(x) + rp + cp))
         return x + self.gamma * (x * a)
 
@@ -118,8 +129,8 @@ class WithPost(nn.Module):
 class PolarityStem(nn.Module):
     """M3 – Polarity-invariant thermal stem: shared first conv on x and its inversion (1-x), averaged.
 
-    Inverting the input (white-hot <-> black-hot) swaps the two branches, so the stem output is
-    exactly invariant to thermal polarity.
+    Inverting the input (white-hot <-> black-hot) swaps the two branches, so the stem output is exactly invariant to
+    thermal polarity.
     """
 
     def __init__(self, base):
@@ -133,8 +144,8 @@ class PolarityStem(nn.Module):
 class RCSBlock(nn.Module):
     """C3k2-RCS bottleneck – Reparameterizable Cross-Strip block.
 
-    Train: parallel depthwise 3x3, 1xk, kx1 (+BN each, + identity BN) -> SE -> 1x1 FFN, residual.
-    Inference: call .reparam() to merge the three depthwise branches + identity into ONE kxk depthwise conv.
+    Train: parallel depthwise 3x3, 1xk, kx1 (+BN each, + identity BN) -> SE -> 1x1 FFN, residual. Inference: call
+    .reparam() to merge the three depthwise branches + identity into ONE kxk depthwise conv.
     """
 
     def __init__(self, c, k=7, ratio=2):
@@ -146,9 +157,16 @@ class RCSBlock(nn.Module):
         self.idn = nn.BatchNorm2d(c)
         self.merged = None
         r = max(8, c // 4)
-        self.se = nn.Sequential(nn.AdaptiveAvgPool2d(1), nn.Conv2d(c, r, 1), nn.ReLU(inplace=True), nn.Conv2d(r, c, 1), nn.Sigmoid())
-        self.ffn = nn.Sequential(nn.Conv2d(c, c * ratio, 1, bias=False), nn.BatchNorm2d(c * ratio), nn.GELU(),
-                                 nn.Conv2d(c * ratio, c, 1, bias=False), nn.BatchNorm2d(c))
+        self.se = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1), nn.Conv2d(c, r, 1), nn.ReLU(inplace=True), nn.Conv2d(r, c, 1), nn.Sigmoid()
+        )
+        self.ffn = nn.Sequential(
+            nn.Conv2d(c, c * ratio, 1, bias=False),
+            nn.BatchNorm2d(c * ratio),
+            nn.GELU(),
+            nn.Conv2d(c * ratio, c, 1, bias=False),
+            nn.BatchNorm2d(c),
+        )
 
     def _mix(self, x):
         if self.merged is not None:
@@ -173,14 +191,24 @@ class RCSBlock(nn.Module):
         k, c, p = self.k, self.c, self.k // 2
         W = torch.zeros(c, 1, k, k, device=self.d3[0].weight.device)
         B = torch.zeros(c, device=W.device)
-        w, b = self._fuse(self.d3[0].weight, self.d3[1]); W[:, :, p - 1:p + 2, p - 1:p + 2] += w; B += b
-        w, b = self._fuse(self.dh[0].weight, self.dh[1]); W[:, :, p:p + 1, :] += w; B += b
-        w, b = self._fuse(self.dv[0].weight, self.dv[1]); W[:, :, :, p:p + 1] += w; B += b
-        idw = torch.zeros(c, 1, k, k, device=W.device); idw[:, 0, p, p] = 1.0
-        w, b = self._fuse(idw, self.idn); W += w; B += b
+        w, b = self._fuse(self.d3[0].weight, self.d3[1])
+        W[:, :, p - 1 : p + 2, p - 1 : p + 2] += w
+        B += b
+        w, b = self._fuse(self.dh[0].weight, self.dh[1])
+        W[:, :, p : p + 1, :] += w
+        B += b
+        w, b = self._fuse(self.dv[0].weight, self.dv[1])
+        W[:, :, :, p : p + 1] += w
+        B += b
+        idw = torch.zeros(c, 1, k, k, device=W.device)
+        idw[:, 0, p, p] = 1.0
+        w, b = self._fuse(idw, self.idn)
+        W += w
+        B += b
         self.merged = nn.Conv2d(c, c, k, 1, p, groups=c, bias=True).to(W.device)
-        self.merged.weight.copy_(W); self.merged.bias.copy_(B)
-        for n in ('d3', 'dh', 'dv', 'idn'):
+        self.merged.weight.copy_(W)
+        self.merged.bias.copy_(B)
+        for n in ("d3", "dh", "dv", "idn"):
             delattr(self, n)
 
 
@@ -198,7 +226,7 @@ class TCDown(nn.Module):
         y = self.base(x)
         z = self.peak(x)
         if z.shape[-2:] != y.shape[-2:]:
-            z = F.interpolate(z, size=y.shape[-2:], mode='nearest')
+            z = F.interpolate(z, size=y.shape[-2:], mode="nearest")
         return y + self.gamma * z
 
 
@@ -211,8 +239,13 @@ class ASC(nn.Module):
         self.row = nn.Conv1d(c, c, k, padding=k // 2, groups=c)
         self.col = nn.Conv1d(c, c, k, padding=k // 2, groups=c)
         self.mix = nn.Sequential(nn.Conv2d(c, c, 1, bias=False), nn.BatchNorm2d(c))
-        self.ffn = nn.Sequential(nn.Conv2d(c, c * ratio, 1, bias=False), nn.BatchNorm2d(c * ratio), nn.SiLU(),
-                                 nn.Conv2d(c * ratio, c, 1, bias=False), nn.BatchNorm2d(c))
+        self.ffn = nn.Sequential(
+            nn.Conv2d(c, c * ratio, 1, bias=False),
+            nn.BatchNorm2d(c * ratio),
+            nn.SiLU(),
+            nn.Conv2d(c * ratio, c, 1, bias=False),
+            nn.BatchNorm2d(c),
+        )
 
     def forward(self, x):
         t = self.pre(x)
@@ -287,7 +320,7 @@ def reparam_all(model):
 
 def _wrap(model, idx, new):
     old = model.model[idx]
-    for a in ('f', 'i', 'type'):
+    for a in ("f", "i", "type"):
         if hasattr(old, a):
             setattr(new, a, getattr(old, a))
     new.np = sum(p.numel() for p in new.parameters())
@@ -309,7 +342,7 @@ def apply_m3(model):
 
 def _swap(model, idx, new):
     old = model.model[idx]
-    for a in ('f', 'i', 'type', 'np'):
+    for a in ("f", "i", "type", "np"):
         if hasattr(old, a):
             setattr(new, a, getattr(old, a))
     new.np = sum(p.numel() for p in new.parameters())
@@ -369,6 +402,7 @@ head:
   - [[19, 22, 25, 28], 1, Detect, [nc]]
 """
 
+
 def build(use: str = "", nc: int = 1, weights: str | None = "yolo11s.pt", p2: bool = True):
     """Build a YOLO11s(-P2) DetectionModel with TankIR blocks.
 
@@ -378,8 +412,11 @@ def build(use: str = "", nc: int = 1, weights: str | None = "yolo11s.pt", p2: bo
         weights (str | None): pretrained checkpoint to load before inserting blocks (keeps pretrained features).
         p2 (bool): use the P2-P5 head (TankIR baseline A0) instead of the standard P3-P5 head.
     """
-    import tempfile, os
+    import os
+    import tempfile
+
     import torch
+
     from ultralytics.nn.tasks import DetectionModel
 
     if p2:
@@ -394,11 +431,18 @@ def build(use: str = "", nc: int = 1, weights: str | None = "yolo11s.pt", p2: bo
         ck = torch.load(weights, map_location="cpu", weights_only=False) if isinstance(weights, str) else weights
         m.load(ck)
     u = {x.strip() for x in use.split(",") if x.strip()}
-    if "asc" in u: apply_asc(m)
-    if "tcd" in u: apply_tcdown(m)
-    if "rcs" in u: apply_rcs(m)
-    if "rcs_zero" in u: apply_rcs_zero(m)
-    if "bsa" in u: apply_m1(m)
-    if "pis" in u: apply_m3(m)
-    if "pis_zero" in u: apply_m3_zero(m)
+    if "asc" in u:
+        apply_asc(m)
+    if "tcd" in u:
+        apply_tcdown(m)
+    if "rcs" in u:
+        apply_rcs(m)
+    if "rcs_zero" in u:
+        apply_rcs_zero(m)
+    if "bsa" in u:
+        apply_m1(m)
+    if "pis" in u:
+        apply_m3(m)
+    if "pis_zero" in u:
+        apply_m3_zero(m)
     return m

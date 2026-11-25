@@ -43,7 +43,10 @@ def align_to(src: np.ndarray, dst: np.ndarray, scale: float = 0.5) -> np.ndarray
         pass
     warp[:, 2] /= scale
     return cv2.warpAffine(
-        src, warp, (dst.shape[1], dst.shape[0]), flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
+        src,
+        warp,
+        (dst.shape[1], dst.shape[0]),
+        flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
         borderMode=cv2.BORDER_REPLICATE,
     )
 
